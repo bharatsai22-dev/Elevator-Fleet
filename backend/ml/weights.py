@@ -20,8 +20,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from backend.algorithms.gbfs_dispatcher import GBFSDispatcher
-    from backend.simulation.models import Building
+    from backend.dispatch.gbfs import GBFSDispatcher
+    from backend.simulator.models import Building
 
 
 class DynamicWeightAdjuster:

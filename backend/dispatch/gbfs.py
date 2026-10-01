@@ -24,11 +24,13 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
+from backend.dispatch.base import DispatchStrategy
+
 if TYPE_CHECKING:
-    from backend.simulation.models import Building
+    from backend.simulator.models import Building
 
 
-class GBFSDispatcher:
+class GBFSDispatcher(DispatchStrategy):
     """Greedy Best-First Search dispatcher for the elevator fleet."""
 
     # ------------------------------------------------------------------

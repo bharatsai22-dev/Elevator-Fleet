@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from backend.simulation.models import Building, Passenger
+    from backend.simulator.models import Building, Passenger
 
 
 FIELDNAMES = [

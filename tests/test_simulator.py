@@ -18,17 +18,17 @@ from datetime import datetime, timedelta
 
 # Ensure project root is on path
 _project_root = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..")
+    os.path.join(os.path.dirname(__file__), "..")
 )
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from backend.simulation.models import Building, Elevator, Passenger
-from backend.algorithms.gbfs_dispatcher import GBFSDispatcher
-from backend.algorithms.astar_sequencer import AStarSequencer
-from backend.algorithms.dynamic_weights import DynamicWeightAdjuster
-from backend.algorithms.prediction import TrafficPredictor
-from backend.simulation.logger import TelemetryLogger
+from backend.simulator.models import Building, Elevator, Passenger
+from backend.dispatch.gbfs import GBFSDispatcher
+from backend.dispatch.astar import AStarSequencer
+from backend.ml.weights import DynamicWeightAdjuster
+from backend.ml.predictor import TrafficPredictor
+from backend.analytics.logger import TelemetryLogger
 
 
 # ═══════════════════════════════════════════════════════════════════════════

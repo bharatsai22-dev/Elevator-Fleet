@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING
 import pygame
 
 if TYPE_CHECKING:
-    from backend.main import ElevatorFleetSimulator
+    from backend.simulator.engine import SimulationEngine
 
 # ---------------------------------------------------------------------------
 # Color palette
@@ -81,7 +81,7 @@ class ElevatorVisualizer:
     CAR_HEIGHT = 28
     MIN_FLOOR_H = 36
 
-    def __init__(self, simulator: "ElevatorFleetSimulator") -> None:
+    def __init__(self, simulator: "SimulationEngine") -> None:
         self.sim = simulator
         self.num_floors = simulator.building.num_floors
         self.num_elevators = len(simulator.building.elevators)
@@ -350,24 +350,24 @@ class ElevatorVisualizer:
 
         # Metrics
         m = self.sim.metrics
-        completed = m["total_completed"]
-        avg_wait = m["total_wait_time"] / completed if completed > 0 else 0.0
+        completed = m.total_completed
+        avg_wait = m.avg_wait_time
         sla_target = self.sim.weight_adjuster.sla_wait_target_sec
         sla_met = avg_wait <= sla_target
 
         stats = [
-            ("Total Calls", str(m["total_calls"])),
+            ("Total Calls", str(m.total_calls)),
             ("Completed", str(completed)),
-            ("Emergency", str(m["emergency_calls"])),
-            ("Rejections", str(m["capacity_rejections"])),
+            ("Emergency", str(m.emergency_calls)),
+            ("Rejections", str(m.capacity_rejections)),
             ("", ""),  # spacer
             ("Avg Wait", f"{avg_wait:.1f}s"),
-            ("Max Wait", f"{m['max_wait_time']:.1f}s"),
+            ("Max Wait", f"{m.max_wait_time:.1f}s"),
             ("SLA Target", f"{sla_target:.0f}s"),
             ("SLA Status", "MET" if sla_met else "VIOLATED"),
             ("", ""),
-            ("Distance", f"{m['total_distance']} floors"),
-            ("Reopts", str(m["reopt_count"])),
+            ("Distance", f"{m.total_distance} floors"),
+            ("Reopts", str(m.reopt_count)),
         ]
 
         for label, value in stats:

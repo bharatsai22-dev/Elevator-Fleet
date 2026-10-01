@@ -1,4 +1,5 @@
 {
+  "seed": 42,
   "simulation": {
     "duration_steps": 3600,
     "time_per_step_sec": 1,

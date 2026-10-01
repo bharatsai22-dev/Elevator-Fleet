@@ -19,7 +19,7 @@ import heapq
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from backend.simulation.models import Building, Elevator
+    from backend.simulator.models import Building, Elevator
 
 
 class AStarSequencer:

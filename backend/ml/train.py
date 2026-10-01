@@ -6,8 +6,8 @@ trains a RandomForestRegressor to predict passenger wait_time_sec from
 dispatch features, and reports model performance metrics.
 
 Usage:
-    python -m backend.train_model                         # default CSV path
-    python -m backend.train_model data/custom_data.csv    # custom CSV
+    python -m backend.ml.train                         # default CSV path
+    python -m backend.ml.train data/custom_data.csv    # custom CSV
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import joblib
 import numpy as np
 
 # Resolve project root
-_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 

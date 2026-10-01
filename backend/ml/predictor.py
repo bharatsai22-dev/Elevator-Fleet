@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from backend.simulation.models import Building
+    from backend.simulator.models import Building
 
 
 class TrafficPredictor:
