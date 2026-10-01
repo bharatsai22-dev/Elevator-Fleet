@@ -1,0 +1,53 @@
+{
+  "simulation": {
+    "duration_steps": 3600,
+    "time_per_step_sec": 1,
+    "building_floors": 15
+  },
+  "elevators": {
+    "count": 4,
+    "max_capacity_kg": 1000,
+    "max_passengers": 10,
+    "seconds_per_floor": 2,
+    "power_idle_w": 200,
+    "power_moving_w": 5000
+  },
+  "gbfs_weights": {
+    "direction_bias": 0.40,
+    "load_balance": 0.25,
+    "distance": 0.20,
+    "wait_time": 0.10,
+    "emergency_bonus": 0.05
+  },
+  "traffic": {
+    "morning_rush": {
+      "start_hour": 7,
+      "end_hour": 10,
+      "lambda_multiplier": 3.0
+    },
+    "lunch_peak": {
+      "start_hour": 12,
+      "end_hour": 14,
+      "lambda_multiplier": 2.0
+    },
+    "evening_rush": {
+      "start_hour": 17,
+      "end_hour": 19,
+      "lambda_multiplier": 2.5
+    },
+    "night_idle": {
+      "start_hour": 22,
+      "end_hour": 6,
+      "lambda_multiplier": 0.3
+    }
+  },
+  "astar": {
+    "reopt_distance_threshold_floors": 2,
+    "max_cost_increase_percent": 15
+  },
+  "tuning": {
+    "sla_wait_target_sec": 45,
+    "weight_update_interval_sec": 30,
+    "load_variance_threshold": 0.25
+  }
+}
