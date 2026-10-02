@@ -3,13 +3,16 @@ Simulation Engine — core orchestrator for the elevator fleet.
 
 Coordinates the full simulation loop:
     1. Generate calls (via TrafficGenerator)
-    2. GBFS dispatches each call to the optimal elevator
+    2. Dispatcher assigns each call to the optimal elevator
     3. A* optimises each elevator's floor sequence
     4. Elevators move one floor per step
     5. Passengers board / alight
-    6. Dynamic weights recalibrate every 30 steps
+    6. Dynamic weights recalibrate every 30 steps (GBFS only)
     7. Traffic predictor updates every 60 steps
-    8. Telemetry is streamed to CSV throughout
+    8. Idle elevators are parked at predicted hotspots
+    9. Telemetry is streamed to CSV throughout
+
+Supports pluggable dispatch strategies via the DispatchStrategy ABC.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from datetime import datetime, timedelta
 import numpy as np
 
 from backend.simulator.models import Building, Elevator, Passenger
+from backend.dispatch.base import DispatchStrategy
 from backend.dispatch.gbfs import GBFSDispatcher
 from backend.dispatch.astar import AStarSequencer
 from backend.ml.weights import DynamicWeightAdjuster
@@ -38,36 +42,70 @@ _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 class SimulationEngine:
     """Production-grade elevator fleet simulation engine."""
 
-    def __init__(self, config_path: str = "config.json") -> None:
+    def __init__(
+        self,
+        config_path: str = "config.json",
+        strategy_name: str | None = None,
+        scenario_name: str | None = None,
+        seed: int | None = None,
+        quiet: bool = False,
+    ) -> None:
         self.config = self._load_config(config_path)
+        self.quiet = quiet
 
         # --- Seed for reproducibility ---
-        seed = self.config.get("seed", 42)
-        self.rng = np.random.default_rng(seed)
+        if seed is not None:
+            self.config["seed"] = seed
+        actual_seed = self.config.get("seed", 42)
+        self.rng = np.random.default_rng(actual_seed)
 
         # --- Core simulation objects ---
         num_floors = self.config["simulation"]["building_floors"]
         num_elevators = self.config["elevators"]["count"]
         self.building = Building.create(num_floors, num_elevators)
 
-        # --- AI components ---
-        self.dispatcher = GBFSDispatcher(self.building)
-        self.sequencer = AStarSequencer(self.building)
-        self.weight_adjuster = DynamicWeightAdjuster(
-            self.dispatcher,
+        # --- Dispatch strategy (pluggable) ---
+        self.strategy_name = strategy_name or "gbfs"
+        self.dispatcher: DispatchStrategy = self._create_dispatcher()
+
+        # --- A* sequencer (used by all strategies) ---
+        self.sequencer = AStarSequencer(
             self.building,
-            sla_wait_target_sec=self.config["tuning"]["sla_wait_target_sec"],
-            adjustment_interval_sec=self.config["tuning"][
-                "weight_update_interval_sec"
-            ],
-            load_variance_threshold=self.config["tuning"][
-                "load_variance_threshold"
-            ],
+            seconds_per_floor=self.config["elevators"].get("seconds_per_floor", 2.0),
         )
+
+        # --- Dynamic Weight Adjuster (GBFS only) ---
+        if isinstance(self.dispatcher, GBFSDispatcher):
+            self.weight_adjuster: DynamicWeightAdjuster | None = (
+                DynamicWeightAdjuster(
+                    self.dispatcher,
+                    self.building,
+                    sla_wait_target_sec=self.config["tuning"][
+                        "sla_wait_target_sec"
+                    ],
+                    adjustment_interval_sec=self.config["tuning"][
+                        "weight_update_interval_sec"
+                    ],
+                    load_variance_threshold=self.config["tuning"][
+                        "load_variance_threshold"
+                    ],
+                )
+            )
+            # Sync SLA target into the dispatcher
+            self.dispatcher.sla_target_sec = self.config["tuning"][
+                "sla_wait_target_sec"
+            ]
+        else:
+            self.weight_adjuster = None
+
+        # --- Traffic predictor ---
         self.traffic_predictor = TrafficPredictor(self.building)
 
-        # --- Traffic generator ---
-        self.traffic = TrafficGenerator(self.building, self.config, self.rng)
+        # --- Traffic generator (with optional scenario) ---
+        self.traffic = TrafficGenerator(
+            self.building, self.config, self.rng,
+            scenario_name=scenario_name,
+        )
 
         # --- Telemetry ---
         data_dir = os.path.join(_project_root, "data")
@@ -88,6 +126,14 @@ class SimulationEngine:
         self._active_passengers: dict[str, dict] = {}
 
     # ------------------------------------------------------------------
+    # Dispatcher factory
+    # ------------------------------------------------------------------
+    def _create_dispatcher(self) -> DispatchStrategy:
+        """Instantiate the dispatch strategy from name."""
+        from backend.dispatch import get_strategy
+        return get_strategy(self.strategy_name, self.building)
+
+    # ------------------------------------------------------------------
     # Config
     # ------------------------------------------------------------------
     @staticmethod
@@ -106,7 +152,7 @@ class SimulationEngine:
         return calls
 
     # ------------------------------------------------------------------
-    # Call processing (GBFS)
+    # Call processing (strategy-agnostic)
     # ------------------------------------------------------------------
     def process_calls(
         self,
@@ -115,7 +161,7 @@ class SimulationEngine:
             | list[tuple[int, str, str, int, int | None]]
         ),
     ) -> None:
-        """Dispatch each incoming call via GBFS or manually."""
+        """Dispatch each incoming call via the active strategy or manually."""
         for call_data in calls:
             floor = call_data[0]
             direction = call_data[1]
@@ -135,7 +181,13 @@ class SimulationEngine:
                 weight_kg=float(np.clip(self.rng.normal(75, 15), 40, 120)),
             )
 
-            # GBFS or Manual assignment
+            # Register pending call in GBFS starvation tracker
+            if isinstance(self.dispatcher, GBFSDispatcher):
+                self.dispatcher.register_pending_call(
+                    call_id, self.sim_time.timestamp()
+                )
+
+            # Dispatch
             if assigned_eid is not None:
                 eid = assigned_eid
                 elevator = self.building.elevators[eid]
@@ -146,8 +198,8 @@ class SimulationEngine:
                     floor, direction, priority
                 )
                 elevator = self.building.elevators[eid]
-                best_score = decision["best_score"]
-                weights_used = decision["weights_used"]
+                best_score = decision.get("best_score", 0.0)
+                weights_used = decision.get("weights_used", {})
 
             # Add to appropriate queue
             if priority == "EXPRESS":
@@ -265,6 +317,10 @@ class SimulationEngine:
             wait = pax.waiting_time_sec() or 0.0
             self.metrics.record_completion(wait)
 
+            # Remove from starvation tracker
+            if isinstance(self.dispatcher, GBFSDispatcher):
+                self.dispatcher.complete_call(pax.passenger_id)
+
             # Telemetry completion
             rec = self._active_passengers.pop(pax.passenger_id, None)
             astar_cost = 0.0
@@ -351,31 +407,90 @@ class SimulationEngine:
                 self.metrics.record_reopt()
 
     # ------------------------------------------------------------------
-    # Dynamic weight adjustment
+    # Dynamic weight adjustment (GBFS only)
     # ------------------------------------------------------------------
     def adjust_weights(self) -> None:
+        if self.weight_adjuster is None:
+            return
         new_w = self.weight_adjuster.adjust_weights(force=True)
-        history = self.weight_adjuster.get_history(1)
-        if history:
-            reasons = history[-1].get("reasons", [])
-            reason_str = " | ".join(reasons) if reasons else "Routine"
-            print(
-                f"  [Weights] {reason_str} -> "
-                f"dir={new_w.get('direction_bias', 0):.3f} "
-                f"load={new_w.get('load_balance', 0):.3f} "
-                f"dist={new_w.get('distance', 0):.3f}"
-            )
+        if not self.quiet:
+            history = self.weight_adjuster.get_history(1)
+            if history:
+                reasons = history[-1].get("reasons", [])
+                reason_str = " | ".join(reasons) if reasons else "Routine"
+                print(
+                    f"  [Weights] {reason_str} -> "
+                    f"dir={new_w.get('direction_bias', 0):.3f} "
+                    f"load={new_w.get('load_balance', 0):.3f} "
+                    f"dist={new_w.get('distance', 0):.3f}"
+                )
 
     # ------------------------------------------------------------------
     # Traffic prediction
     # ------------------------------------------------------------------
     def update_prediction(self) -> None:
         self.traffic_predictor.update_prediction()
+        if not self.quiet:
+            forecast = self.traffic_predictor.forecast_next_n_minutes(5)
+            print(
+                f"  [Forecast] Next 5 min: ~{forecast['forecasted_volume']} calls "
+                f"(conf={forecast['confidence']:.2f}) -> {forecast['recommendation']}"
+            )
+
+    # ------------------------------------------------------------------
+    # Idle elevator parking (Phase 2D)
+    # ------------------------------------------------------------------
+    def park_idle_elevators(self) -> None:
+        """
+        Move idle elevators toward floors with predicted high demand.
+
+        Uses the traffic predictor's rates to distribute idle
+        elevators across the building optimally.
+        """
+        idle_elevators = [
+            e for e in self.building.elevators
+            if e.is_operational
+            and e.direction == "IDLE"
+            and not e.has_pending_stops()
+            and len(e.passengers) == 0
+        ]
+
+        if not idle_elevators:
+            return
+
+        num_floors = self.building.num_floors
+        num_idle = len(idle_elevators)
+
+        # Distribute idle elevators evenly across the building,
+        # biased toward the predicted peak floor range
         forecast = self.traffic_predictor.forecast_next_n_minutes(5)
-        print(
-            f"  [Forecast] Next 5 min: ~{forecast['forecasted_volume']} calls "
-            f"(conf={forecast['confidence']:.2f}) -> {forecast['recommendation']}"
-        )
+        peak_low, peak_high = forecast.get("peak_floor_range", (1, num_floors))
+
+        # Generate target floors spread across the peak zone
+        if num_idle == 1:
+            targets = [(peak_low + peak_high) // 2]
+        else:
+            step = max(1, (peak_high - peak_low) // (num_idle - 1))
+            targets = [
+                min(peak_low + i * step, num_floors)
+                for i in range(num_idle)
+            ]
+
+        # Assign each idle elevator to its nearest target
+        assigned_targets = list(targets)
+        for elev in idle_elevators:
+            if not assigned_targets:
+                break
+            # Find nearest unassigned target
+            best_t = min(
+                assigned_targets,
+                key=lambda t: abs(elev.current_floor - t),
+            )
+            assigned_targets.remove(best_t)
+
+            if elev.current_floor != best_t:
+                direction = "UP" if best_t > elev.current_floor else "DOWN"
+                elev.add_to_queue(best_t, direction)
 
     # ------------------------------------------------------------------
     # Edge-case checks
@@ -390,11 +505,12 @@ class SimulationEngine:
         for e in self.building.elevators:
             has_work = e.has_pending_stops() or len(e.passengers) > 0
             if e.idle_time_sec > 300 and has_work:
-                print(
-                    f"  [STUCK] Elevator {e.elevator_id} idle "
-                    f"{e.idle_time_sec:.0f}s with pending work -- "
-                    f"marking non-operational & redistributing"
-                )
+                if not self.quiet:
+                    print(
+                        f"  [STUCK] Elevator {e.elevator_id} idle "
+                        f"{e.idle_time_sec:.0f}s with pending work -- "
+                        f"marking non-operational & redistributing"
+                    )
                 e.is_operational = False
 
                 # Re-dispatch every waiting passenger assigned to this elevator
@@ -417,19 +533,26 @@ class SimulationEngine:
     # ═══════════════════════════════════════════════════════════════════
     def run_simulation(self) -> dict:
         """Execute the full simulation and return a summary dict."""
-        print("=" * 65)
-        print("  ENTERPRISE ELEVATOR FLEET DISPATCHER - SIMULATION START")
-        print("=" * 65)
-        print(
-            f"  Building : {self.building.num_floors} floors, "
-            f"{len(self.building.elevators)} elevators"
-        )
-        print(f"  Duration : {self.total_steps} steps ({self.total_steps}s)")
-        print(
-            f"  SLA      : {self.weight_adjuster.sla_wait_target_sec}s avg wait"
-        )
-        print(f"  Seed     : {self.config.get('seed', 42)}")
-        print("=" * 65)
+        if not self.quiet:
+            print("=" * 65)
+            print("  ENTERPRISE ELEVATOR FLEET DISPATCHER - SIMULATION START")
+            print("=" * 65)
+            print(
+                f"  Building  : {self.building.num_floors} floors, "
+                f"{len(self.building.elevators)} elevators"
+            )
+            print(f"  Strategy  : {self.dispatcher.get_name()}")
+            if self.traffic.scenario_name:
+                print(f"  Scenario  : {self.traffic.scenario_name}")
+            print(f"  Duration  : {self.total_steps} steps ({self.total_steps}s)")
+            sla = (
+                self.weight_adjuster.sla_wait_target_sec
+                if self.weight_adjuster
+                else self.config["tuning"]["sla_wait_target_sec"]
+            )
+            print(f"  SLA       : {sla}s avg wait")
+            print(f"  Seed      : {self.config.get('seed', 42)}")
+            print("=" * 65)
 
         for step in range(self.total_steps):
             self.current_step = step
@@ -438,7 +561,7 @@ class SimulationEngine:
             # 1. Generate calls
             calls = self.generate_calls()
 
-            # 2. GBFS dispatch
+            # 2. Dispatch
             if calls:
                 self.process_calls(calls)
 
@@ -449,7 +572,7 @@ class SimulationEngine:
             if step % 10 == 0:
                 self.reoptimize_routes()
 
-            # 5. Dynamic weight adjustment (every 30 steps)
+            # 5. Dynamic weight adjustment (every 30 steps, GBFS only)
             if step % 30 == 0 and step > 0:
                 self.adjust_weights()
 
@@ -457,30 +580,44 @@ class SimulationEngine:
             if step % 60 == 0 and step > 0:
                 self.update_prediction()
 
-            # 7. Edge-case checks (every 120 steps)
+            # 7. Idle elevator parking (every 120 steps)
+            if step % 120 == 0:
+                self.park_idle_elevators()
+
+            # 8. Edge-case checks (every 120 steps)
             if step % 120 == 0:
                 self.check_stuck_elevators()
 
-            # 8. Progress report (every 300 steps)
-            if step % 300 == 0 and step > 0:
+            # 9. Progress report (every 300 steps)
+            if step % 300 == 0 and step > 0 and not self.quiet:
                 self.metrics.print_progress(step, self.total_steps)
 
         # Finalise
         self.logger.close()
         summary = self._generate_summary()
-        self._print_summary(summary)
+        if not self.quiet:
+            self._print_summary(summary)
         return summary
 
     # ------------------------------------------------------------------
     # Reporting (delegates to MetricsCollector)
     # ------------------------------------------------------------------
     def _generate_summary(self) -> dict:
-        return self.metrics.generate_summary(
+        sla = (
+            self.weight_adjuster.sla_wait_target_sec
+            if self.weight_adjuster
+            else self.config["tuning"]["sla_wait_target_sec"]
+        )
+        summary = self.metrics.generate_summary(
             total_steps=self.total_steps,
             time_per_step=self.time_per_step,
-            sla_target=self.weight_adjuster.sla_wait_target_sec,
+            sla_target=sla,
             csv_rows=self.logger.total_rows_written,
         )
+        summary["strategy"] = self.dispatcher.get_name()
+        summary["scenario"] = self.traffic.scenario_name or "config_default"
+        summary["seed"] = self.config.get("seed", 42)
+        return summary
 
     @staticmethod
     def _print_summary(s: dict) -> None:

@@ -14,11 +14,12 @@
     "power_moving_w": 5000
   },
   "gbfs_weights": {
-    "direction_bias": 0.40,
-    "load_balance": 0.25,
-    "distance": 0.20,
+    "direction_bias": 0.35,
+    "load_balance": 0.20,
+    "distance": 0.18,
     "wait_time": 0.10,
-    "emergency_bonus": 0.05
+    "emergency_bonus": 0.05,
+    "fairness": 0.12
   },
   "traffic": {
     "morning_rush": {
@@ -44,7 +45,8 @@
   },
   "astar": {
     "reopt_distance_threshold_floors": 2,
-    "max_cost_increase_percent": 15
+    "max_cost_increase_percent": 15,
+    "max_nodes": 50000
   },
   "tuning": {
     "sla_wait_target_sec": 45,

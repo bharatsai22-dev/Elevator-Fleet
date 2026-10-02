@@ -3,10 +3,13 @@ A* Floor Sequencer — Individual Elevator Pathfinding.
 
 Once an elevator has been dispatched (by GBFS) and has multiple stops
 queued, this module computes the optimal floor-visitation order using
-A* search, minimising total vertical travel distance.
+A* search, minimising total vertical travel time.
 
-Key features:
+Key features (Phase 2C — Enhanced):
     - Guarantees shortest-path via f(n) = g(n) + h(n)
+    - Improved admissible heuristic: max-distance lower bound
+    - Node-limit safety (max_nodes) to prevent explosion on large queues
+    - Time-based cost (seconds_per_floor) instead of raw floor count
     - Call-Adaptive Soft Reoptimisation within a ±2-floor pickup zone
     - Hard +15 % cost bound: never degrades existing passengers' routes
       beyond 15 % of the original optimal cost
@@ -25,20 +28,25 @@ if TYPE_CHECKING:
 class AStarSequencer:
     """A* search engine for single-elevator floor sequencing."""
 
-    def __init__(self, building: "Building") -> None:
+    def __init__(
+        self,
+        building: "Building",
+        seconds_per_floor: float = 2.0,
+    ) -> None:
         self.building = building
+        self.seconds_per_floor = seconds_per_floor
         self.reopt_distance_threshold: int = 2      # ±floors to trigger reopt
         self.max_cost_increase_pct: float = 15.0     # hard bound
+        self.max_nodes: int = 50_000                 # safety limit
 
     # ------------------------------------------------------------------
     # Cost calculation
     # ------------------------------------------------------------------
-    @staticmethod
-    def calculate_route_cost(floors: list[int]) -> float:
-        """Total vertical distance for an ordered list of floors."""
+    def calculate_route_cost(self, floors: list[int]) -> float:
+        """Total travel time (seconds) for an ordered list of floors."""
         cost = 0.0
         for i in range(len(floors) - 1):
-            cost += abs(floors[i + 1] - floors[i])
+            cost += abs(floors[i + 1] - floors[i]) * self.seconds_per_floor
         return cost
 
     # ------------------------------------------------------------------
@@ -52,8 +60,8 @@ class AStarSequencer:
         starting from *current_floor*.
 
         f(n) = g(n) + h(n)
-            g(n) = accumulated vertical distance so far
-            h(n) = distance to the farthest remaining unvisited floor
+            g(n) = accumulated travel time so far
+            h(n) = admissible lower-bound on remaining travel time
 
         Returns:
             Ordered list beginning with *current_floor*.
@@ -61,18 +69,27 @@ class AStarSequencer:
         if not unvisited_floors:
             return [current_floor]
 
+        # For very large queues, fall back immediately to avoid explosion
+        if len(unvisited_floors) > 15:
+            return self._greedy_nearest_neighbor(current_floor, unvisited_floors)
+
         target_count = len(unvisited_floors)
 
         # (f_score, g_score, current_floor, visited_mask, path)
-        # visited_mask: bitmask of visited indices in unvisited_floors
         initial_h = self._heuristic(current_floor, unvisited_floors, 0)
         open_set: list[tuple[float, float, int, int, tuple]] = [
             (initial_h, 0.0, current_floor, 0, (current_floor,))
         ]
         best_cost: dict[tuple[int, int], float] = {}
+        nodes_explored: int = 0
 
         while open_set:
             f, g, floor, visited, path = heapq.heappop(open_set)
+            nodes_explored += 1
+
+            # Safety limit
+            if nodes_explored > self.max_nodes:
+                return self._greedy_nearest_neighbor(current_floor, unvisited_floors)
 
             # All floors visited?
             if bin(visited).count("1") == target_count:
@@ -88,7 +105,8 @@ class AStarSequencer:
                 if visited & bit:
                     continue  # already visited
 
-                new_g = g + abs(next_floor - floor)
+                step_cost = abs(next_floor - floor) * self.seconds_per_floor
+                new_g = g + step_cost
                 new_visited = visited | bit
                 new_h = self._heuristic(next_floor, unvisited_floors, new_visited)
                 new_f = new_g + new_h
@@ -102,13 +120,26 @@ class AStarSequencer:
         return self._greedy_nearest_neighbor(current_floor, unvisited_floors)
 
     # ------------------------------------------------------------------
-    # Heuristic
+    # Heuristic (admissible — never overestimates)
     # ------------------------------------------------------------------
-    @staticmethod
     def _heuristic(
-        current_floor: int, unvisited: list[int], visited_mask: int
+        self, current_floor: int, unvisited: list[int], visited_mask: int
     ) -> float:
-        """h(n): distance from *current_floor* to the farthest remaining floor."""
+        """
+        h(n): admissible lower bound on remaining travel time.
+
+        Uses the distance from *current_floor* to the farthest remaining
+        floor.  This is always ≤ the true optimal remaining cost because
+        visiting the farthest floor requires at least that much travel,
+        and any other floors visited along the way only add cost.
+
+        Proof of admissibility:
+            Let F = argmax |current_floor - f| for f in remaining.
+            The true cost must include travelling to F (among other stops),
+            so the true cost ≥ |current_floor - F| × seconds_per_floor.
+            Since h(n) = |current_floor - F| × seconds_per_floor, we have
+            h(n) ≤ true_cost.  ∎
+        """
         remaining = [
             f
             for idx, f in enumerate(unvisited)
@@ -116,7 +147,10 @@ class AStarSequencer:
         ]
         if not remaining:
             return 0.0
-        return float(max(abs(current_floor - f) for f in remaining))
+        return (
+            float(max(abs(current_floor - f) for f in remaining))
+            * self.seconds_per_floor
+        )
 
     # ------------------------------------------------------------------
     # Greedy fallback

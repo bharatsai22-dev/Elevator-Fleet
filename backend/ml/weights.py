@@ -12,6 +12,7 @@ Adjustment rules:
     - Load imbalance → boost load_balance weight
     - High traffic   → boost emergency_bonus
     - Low traffic    → boost distance weight (optimise energy)
+    - Starvation     → boost fairness weight (Phase 2B)
 """
 
 from __future__ import annotations
@@ -71,6 +72,11 @@ class DynamicWeightAdjuster:
             else 0.0
         )
 
+        # Max wait from recent completed calls
+        max_wait = max(
+            (c["wait_time"] for c in recent), default=0.0
+        )
+
         # Traffic intensity (calls in the last 100 history entries, rough calls/min)
         recent_calls = self.building.call_history[-100:]
         traffic_intensity = len(recent_calls) / 2.0  # approximation
@@ -81,6 +87,7 @@ class DynamicWeightAdjuster:
             "min_load": round(min_load, 2),
             "load_variance": round(variance, 4),
             "avg_wait_time": round(avg_wait, 2),
+            "max_wait_time": round(max_wait, 2),
             "traffic_intensity": round(traffic_intensity, 2),
         }
 
@@ -141,6 +148,15 @@ class DynamicWeightAdjuster:
                 f"LOW TRAFFIC: {metrics['traffic_intensity']:.1f} calls/min"
             )
             new_weights["distance"] += 0.05
+            new_weights["direction_bias"] -= 0.02
+
+        # ---- RULE 5: Starvation (Phase 2B) ----
+        if metrics["max_wait_time"] > self.sla_wait_target_sec * 1.5:
+            reasons.append(
+                f"STARVATION RISK: max_wait={metrics['max_wait_time']:.1f}s "
+                f"> {self.sla_wait_target_sec * 1.5:.0f}s"
+            )
+            new_weights["fairness"] = new_weights.get("fairness", 0.12) + 0.05
             new_weights["direction_bias"] -= 0.02
 
         # Normalise to sum ≈ 1.0
