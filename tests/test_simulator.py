@@ -115,6 +115,29 @@ class TestElevator(unittest.TestCase):
         self.assertEqual(e.current_floor, 4)
         self.assertEqual(e.direction, "DOWN")
 
+    def test_fire_mode(self):
+        """Test fire mode recall logic on elevator."""
+        e = Elevator()
+        e.add_to_queue(5, "UP")
+        e.add_express_call(10)
+        e.add_express_call(8, is_vip=True)
+        
+        # Trigger fire recall
+        e.trigger_fire_recall()
+        
+        self.assertTrue(e.fire_mode)
+        self.assertEqual(len(e.up_queue), 0)
+        self.assertEqual(len(e.express_queue), 0)
+        self.assertEqual(len(e.vip_queue), 0)
+        
+    def test_out_of_service(self):
+        """Test out of service logic."""
+        e = Elevator()
+        e.add_to_queue(5, "UP")
+        e.set_out_of_service()
+        self.assertFalse(e.is_operational)
+        self.assertEqual(len(e.up_queue), 0)
+
 
 class TestBuilding(unittest.TestCase):
     """Building model tests."""
@@ -141,6 +164,25 @@ class TestBuilding(unittest.TestCase):
         b.add_call(8, "DOWN")
         b.add_call(1, "UP", "EXPRESS")
         self.assertEqual(len(b.get_pending_calls()), 3)
+
+    def test_add_call_vip(self):
+        """VIP calls should go to vip_calls list."""
+        b = Building.create(10, 2)
+        b.add_call(9, "UP", "VIP")
+        self.assertEqual(len(b.vip_calls), 1)
+        pending = b.get_pending_calls()
+        self.assertIn((9, "BOTH", "VIP"), pending)
+        
+    def test_fire_alarm(self):
+        """Fire alarm should put building and elevators in fire mode."""
+        b = Building.create(10, 2)
+        b.add_call(5, "UP")
+        b.elevators[0].add_to_queue(5, "UP")
+        b.trigger_fire_alarm()
+        self.assertTrue(b.fire_mode)
+        self.assertEqual(len(b.up_calls), 0)
+        self.assertTrue(b.elevators[0].fire_mode)
+        self.assertEqual(len(b.elevators[0].up_queue), 0)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

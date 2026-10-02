@@ -50,47 +50,18 @@
 
 ---
 
-## Next Phase: Phase 5 — Web Dashboard (25% of project)
+### Phase 5: Web Dashboard ✅
+- **Backend**: FastAPI server with WebSocket streaming simulation state at ~10 FPS.
+- **Frontend**: Premium dark-theme dashboard with animated building, live stats, SLA tracking, and dynamic charts.
+- **Controls**: Speed slider, strategy dropdown, scenario selection, pause/resume.
 
-### What to build:
+### Phase 6: Quality & Edge Cases ✅
+- **Edge cases implemented**: VIP express calls, Fire Mode (recall to ground), and Elevator Out-of-Service breakdowns.
+- **Tests**: Expanded suite to 58 unit tests covering all edge cases, scoring logic, and predictive models.
 
-**Backend** (`backend/api/`):
-- FastAPI server with WebSocket streaming simulation state
-- REST endpoints: start/pause, speed control, scenario/strategy selection
-- The `api/__init__.py` currently exists but is empty
-
-**Frontend** (`frontend/`):
-- Directory doesn't exist yet — needs to be created
-- **Screen layout per PROJECT_PLAN.md:**
-  - Center: animated building with sliding elevators and floor queues
-  - Top: live stats (avg wait, SLA, served count)
-  - Right: decision log ("Lift 2 chosen, score 34")
-  - Bottom: live charts (wait-time, utilisation over time)
-  - Controls: start/pause, speed slider, scenario dropdown, strategy dropdown
-- **Wow features:**
-  - Side-by-side mode (GBFS vs baseline on same traffic)
-  - Dark theme, smooth animations, color-coded elevator load, floor heatmap toggle
-
-### Dependencies to add:
-- `fastapi`, `uvicorn`, `websockets` (for API)
-- Current `requirements.txt` has: numpy, scikit-learn, pygame, matplotlib
-
----
-
-## Remaining Phases
-
-### Phase 6: Quality
-- Tests for capacity limit, scoring, scenario repeatability
-- Edge cases: lift out of service, VIP/fire mode
-- Error handling and input checks
-
-### Phase 7: Documentation & Submission
-- README with architecture diagram, demo GIF, run steps, results table
-- Report: problem, method, heuristic, experiments, results, limits, future work
-- Demo script: 3-minute flow for professor
-- Presentation slides
-
----
+### Phase 7: Documentation & Submission ✅
+- **README.md**: Full setup instructions and architecture overview.
+- **REPORT.md**: Comprehensive academic report detailing methodology, heuristics, limits, and a 3-minute demo script.
 
 ## Project Structure (current)
 ```
@@ -101,10 +72,10 @@ advanced_elevator_dispatcher/
 │   ├── scenarios/      traffic.py (4 scenarios)
 │   ├── analytics/      metrics.py, logger.py
 │   ├── ml/             predictor.py, weights.py, train.py
-│   ├── api/            __init__.py (empty — Phase 5)
+│   ├── api/            server.py, __init__.py
 │   ├── main.py         CLI entry point
 │   └── visualization.py  Pygame visualizer (legacy)
-├── frontend/           (not yet created — Phase 5)
+├── frontend/           index.html, styles.css, app.js
 ├── tests/              test_simulator.py (54 tests)
 ├── results/            benchmark_results.csv, benchmark_summary.md
 ├── data/               elevator_training_data.csv
@@ -115,7 +86,4 @@ advanced_elevator_dispatcher/
 └── README.md
 ```
 
-## Quick Start Prompt for New Session
-Copy-paste this to get started immediately:
-
-> I'm working on an advanced elevator dispatcher project. Phases 1–4 are complete. Read `STATUS.md` and `PROJECT_PLAN.md` in the repo root for full context. Continue with **Phase 5: Web Dashboard** — FastAPI + WebSocket backend and a web frontend with live building visualization, stats panel, decision log, charts, and side-by-side comparison mode. Dark theme, smooth animations.
+> I'm working on an advanced elevator dispatcher project. All phases (1-7) are now 100% complete! Review `STATUS.md`, `README.md`, and `REPORT.md` to see the final deliverables.

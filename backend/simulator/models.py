@@ -23,7 +23,7 @@ class Passenger:
     passenger_id: str = field(default_factory=lambda: f"PAX_{uuid.uuid4().hex[:8]}")
     origin_floor: int = 1
     dest_floor: int = 1
-    priority: str = "NORMAL"        # "NORMAL" or "EXPRESS"
+    priority: str = "NORMAL"        # "NORMAL", "EXPRESS", or "VIP"
     direction: str = "UP"           # "UP" or "DOWN"
     request_time: datetime = field(default_factory=datetime.now)
     pickup_time: Optional[datetime] = None
@@ -82,6 +82,7 @@ class Elevator:
     up_queue: list = field(default_factory=list)
     down_queue: list = field(default_factory=list)
     express_queue: list = field(default_factory=list)
+    vip_queue: list = field(default_factory=list)
 
     # Physical constraints
     max_load_kg: float = 1000.0
@@ -96,6 +97,7 @@ class Elevator:
     # Operational state
     idle_time_sec: float = 0.0
     is_operational: bool = True
+    fire_mode: bool = False
 
     # Telemetry counters
     trips_completed: int = 0
@@ -107,9 +109,10 @@ class Elevator:
     # ------------------------------------------------------------------
     def can_accept_passenger(self, passenger: Passenger) -> bool:
         """True if the elevator has enough weight AND headcount capacity."""
+        if self.fire_mode or not self.is_operational:
+            return False
         return (
-            self.is_operational
-            and self.total_load_kg + passenger.weight_kg <= self.max_load_kg
+            self.total_load_kg + passenger.weight_kg <= self.max_load_kg
             and len(self.passengers) < self.max_passengers
         )
 
@@ -143,6 +146,8 @@ class Elevator:
     # ------------------------------------------------------------------
     def add_to_queue(self, floor: int, direction: str) -> None:
         """Add a floor to the appropriate directional queue."""
+        if self.fire_mode:
+            return
         if direction == "UP":
             if floor not in self.up_queue:
                 self.up_queue.append(floor)
@@ -150,18 +155,24 @@ class Elevator:
             if floor not in self.down_queue:
                 self.down_queue.append(floor)
 
-    def add_express_call(self, floor: int) -> None:
+    def add_express_call(self, floor: int, is_vip: bool = False) -> None:
         """Add an emergency / high-priority floor."""
-        if floor not in self.express_queue:
-            self.express_queue.append(floor)
+        if self.fire_mode:
+            return
+        if is_vip:
+            if floor not in self.vip_queue:
+                self.vip_queue.append(floor)
+        else:
+            if floor not in self.express_queue:
+                self.express_queue.append(floor)
 
     def has_pending_stops(self) -> bool:
         """True if any queue still has work."""
-        return bool(self.up_queue or self.down_queue or self.express_queue)
+        return bool(self.up_queue or self.down_queue or self.express_queue or self.vip_queue)
 
     def all_pending_floors(self) -> list:
         """Return a de-duplicated list of all floors this elevator must visit."""
-        floors = set(self.up_queue) | set(self.down_queue) | set(self.express_queue)
+        floors = set(self.up_queue) | set(self.down_queue) | set(self.express_queue) | set(self.vip_queue)
         # Also include destination floors of on-board passengers
         for p in self.passengers:
             floors.add(p.dest_floor)
@@ -189,6 +200,23 @@ class Elevator:
         """Mark this elevator as idle."""
         self.direction = "IDLE"
         self.power_consumption_w = self.POWER_IDLE_W
+
+    def trigger_fire_recall(self) -> None:
+        """Emergency mode: drop all queues, head directly to floor 1."""
+        self.fire_mode = True
+        self.up_queue.clear()
+        self.down_queue.clear()
+        self.express_queue.clear()
+        self.vip_queue.clear()
+        # The engine will need to handle moving it to floor 1 and keeping doors open.
+        
+    def set_out_of_service(self) -> None:
+        """Simulate a breakdown."""
+        self.is_operational = False
+        self.up_queue.clear()
+        self.down_queue.clear()
+        self.express_queue.clear()
+        self.vip_queue.clear()
 
     def __repr__(self) -> str:
         return (
@@ -221,9 +249,13 @@ class Building:
     up_calls: list = field(default_factory=list)       # list[tuple[int, datetime]]
     down_calls: list = field(default_factory=list)     # list[tuple[int, datetime]]
     express_calls: list = field(default_factory=list)  # list[tuple[int, datetime]]
+    vip_calls: list = field(default_factory=list)      # list[tuple[int, datetime]]
 
     # Traffic pattern context
     current_hour: int = 0
+    
+    # Emergency state
+    fire_mode: bool = False
 
     # SLA tracking
     avg_wait_time_sec: float = 0.0
@@ -260,7 +292,12 @@ class Building:
         call_id = f"CALL_{len(self.call_history)}_{datetime.now().timestamp():.0f}"
         now = datetime.now()
 
-        if priority == "EXPRESS":
+        if self.fire_mode:
+            return call_id # Do not process new calls in fire mode
+
+        if priority == "VIP":
+            self.vip_calls.append((floor, now))
+        elif priority == "EXPRESS":
             self.express_calls.append((floor, now))
         elif direction == "UP":
             self.up_calls.append((floor, now))
@@ -290,11 +327,17 @@ class Building:
             pending.append((floor, "DOWN", "NORMAL"))
         for floor, _ts in self.express_calls:
             pending.append((floor, "BOTH", "EXPRESS"))
+        for floor, _ts in self.vip_calls:
+            pending.append((floor, "BOTH", "VIP"))
         return pending
 
     def remove_call(self, floor: int, direction: str, priority: str = "NORMAL") -> None:
         """Remove the first matching call from the appropriate queue."""
-        if priority == "EXPRESS":
+        if priority == "VIP":
+            self.vip_calls = [
+                (f, ts) for f, ts in self.vip_calls if f != floor
+            ]
+        elif priority == "EXPRESS":
             self.express_calls = [
                 (f, ts) for f, ts in self.express_calls if f != floor
             ]
@@ -338,6 +381,16 @@ class Building:
                 (self.avg_wait_time_sec * (n - 1) + wait) / n
             )
             self.max_wait_time_sec = max(self.max_wait_time_sec, wait)
+
+    def trigger_fire_alarm(self) -> None:
+        """Trigger building-wide fire alarm, recalling all elevators."""
+        self.fire_mode = True
+        self.up_calls.clear()
+        self.down_calls.clear()
+        self.express_calls.clear()
+        self.vip_calls.clear()
+        for elevator in self.elevators:
+            elevator.trigger_fire_recall()
 
     def __repr__(self) -> str:
         return (

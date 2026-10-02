@@ -202,8 +202,10 @@ class SimulationEngine:
                 weights_used = decision.get("weights_used", {})
 
             # Add to appropriate queue
-            if priority == "EXPRESS":
-                elevator.add_express_call(floor)
+            if priority == "VIP":
+                elevator.add_express_call(floor, is_vip=True)
+            elif priority == "EXPRESS":
+                elevator.add_express_call(floor, is_vip=False)
             else:
                 elevator.add_to_queue(floor, direction)
 
@@ -256,7 +258,19 @@ class SimulationEngine:
 
     def _next_target(self, elevator: Elevator) -> int | None:
         """Determine the next floor the elevator should head towards."""
-        # Priority: EXPRESS > direction-matching queue > other queue
+        # Fire mode: go straight to floor 1 and wait
+        if getattr(elevator, "fire_mode", False):
+            if elevator.current_floor != 1:
+                return 1
+            return None
+
+        # Priority: VIP > EXPRESS > direction-matching queue > other queue
+        if getattr(elevator, "vip_queue", []):
+            return min(
+                elevator.vip_queue,
+                key=lambda f: abs(f - elevator.current_floor),
+            )
+            
         if elevator.express_queue:
             return min(
                 elevator.express_queue,
@@ -367,8 +381,10 @@ class SimulationEngine:
             new_elevator = self.building.elevators[new_eid]
             rec["elevator_id"] = new_eid
             rec["reopt_count"] += 1
-            if pax.priority == "EXPRESS":
-                new_elevator.add_express_call(pax.origin_floor)
+            if pax.priority == "VIP":
+                new_elevator.add_express_call(pax.origin_floor, is_vip=True)
+            elif pax.priority == "EXPRESS":
+                new_elevator.add_express_call(pax.origin_floor, is_vip=False)
             else:
                 new_elevator.add_to_queue(pax.origin_floor, rec["direction"])
 
@@ -382,6 +398,8 @@ class SimulationEngine:
                 elevator.up_queue.remove(floor)
             if floor in elevator.down_queue:
                 elevator.down_queue.remove(floor)
+            if floor in getattr(elevator, "vip_queue", []):
+                elevator.vip_queue.remove(floor)
             if floor in elevator.express_queue:
                 elevator.express_queue.remove(floor)
             # Use the passenger's original requested direction, not the
