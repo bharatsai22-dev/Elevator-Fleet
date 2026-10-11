@@ -67,23 +67,30 @@
 ```
 advanced_elevator_dispatcher/
 ├── backend/
-│   ├── simulator/      engine.py, models.py
-│   ├── dispatch/       base.py, gbfs.py, astar.py, nearest.py, round_robin.py, scan.py
+│   ├── engine/         dispatcher.py, simulation.py, router.py, telemetry.py, weights.py
+│   ├── dispatch/       astar.py, gbfs.py, nearest.py, round_robin.py, scan.py
 │   ├── scenarios/      traffic.py (4 scenarios)
 │   ├── analytics/      metrics.py, logger.py
+│   ├── alerts/         manager.py, notifier.py, rules.py
+│   ├── xai/            explainer.py (Explainable AI decision justification)
 │   ├── ml/             predictor.py, weights.py, train.py
-│   ├── api/            server.py, __init__.py
-│   ├── main.py         CLI entry point
-│   └── visualization.py  Pygame visualizer (legacy)
-├── frontend/           index.html, styles.css, app.js
-├── tests/              test_simulator.py (54 tests)
+│   ├── api/            server.py (FastAPI + WebSocket stream)
+│   ├── database.py     Local SQLite database for RBAC & history
+│   ├── auth.py         Role-Based Access Control logic
+│   └── main.py         CLI entry point
+├── web-app/            Modern Vite + React 19 interactive SPA dashboard
+│   ├── src/pages/      Dashboard, Fleet, Arena, AStarEngine, AlertCenter, Analytics, History, etc.
+│   └── src/components/ BuildingView, DecisionLog, MetricsBar, XAIGuide, etc.
+├── tests/              test_simulator.py (58 unit tests)
 ├── results/            benchmark_results.csv, benchmark_summary.md
-├── data/               elevator_training_data.csv
-├── benchmark.py        Benchmark runner
-├── config.json         All settings
-├── PROJECT_PLAN.md     Full 7-phase roadmap
-├── STATUS.md           ← THIS FILE
-└── README.md
+├── benchmark.py        Benchmark matrix runner
+├── config.json         System settings & building parameters
+├── WORK_HISTORY_AND_ROADMAP.md  Detailed log of work done and upcoming roadmap
+├── PROJECT_PLAN.md     Initial 7-phase roadmap
+├── STATUS.md           Current status overview
+├── REPORT.md           Academic project report
+└── README.md           Setup, quickstart, and architecture
 ```
 
-> I'm working on an advanced elevator dispatcher project. All phases (1-7) are now 100% complete! Review `STATUS.md`, `README.md`, and `REPORT.md` to see the final deliverables.
+> See `WORK_HISTORY_AND_ROADMAP.md` for complete breakdown of all historical milestones and future sprint goals.
+

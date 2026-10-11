@@ -1,73 +1,64 @@
 """
-Telemetry Logger — CSV Data Generator for ML Training.
+Telemetry Logger — CSV-based simulation data recording.
 
-Logs every call assignment and completion to `elevator_training_data.csv`
-with 21 columns, using buffered batch writes for performance.
-
-Output is a 100 % plagiarism-free synthetic dataset suitable for
-Scikit-Learn Random Forest or Gradient Boosting training.
+Writes a row to the training CSV for every call assignment and
+completion event.  The resulting CSV can be used for:
+    - Post-hoc analysis and visualisation
+    - ML training (RandomForest on gbfs_score → predicted wait_time)
 """
 
 from __future__ import annotations
 
 import csv
 import os
-from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from backend.simulator.models import Building, Passenger
+    from backend.simulator.models import Passenger
 
 
-FIELDNAMES = [
-    "timestamp",
+# CSV column schema
+_FIELDNAMES = [
+    "event_type",
     "call_id",
     "origin_floor",
     "dest_floor",
-    "call_priority",
-    "assigned_elevator_id",
-    "pickup_time_actual_sec",
-    "dropoff_time_sec",
-    "elevator_load_kg_at_pickup",
+    "direction",
+    "priority",
+    "elevator_id",
+    "gbfs_score",
+    "weight_direction_bias",
+    "weight_load_balance",
+    "weight_distance",
+    "weight_wait_time",
+    "weight_emergency_bonus",
+    "weight_fairness",
+    "traffic_intensity",
+    "elevator_load_kg",
     "wait_time_sec",
     "travel_time_sec",
-    "direction_match",
-    "traffic_intensity",
-    "hour_of_day",
-    "gbfs_score",
+    "total_time_sec",
     "astar_cost",
-    "direction_weight",
-    "load_weight",
-    "distance_weight",
-    "wait_weight",
-    "reopt_triggered",
     "reopt_count",
 ]
 
 
 class TelemetryLogger:
-    """Buffered CSV logger for elevator simulation telemetry."""
+    """Writes simulation telemetry to a CSV file."""
 
-    def __init__(
-        self,
-        csv_filename: str = "elevator_training_data.csv",
-        buffer_size: int = 100,
-    ) -> None:
+    def __init__(self, csv_filename: str = "elevator_training_data.csv") -> None:
         self.csv_filename = csv_filename
-        self.buffer: list[dict] = []
-        self.buffer_size = buffer_size
         self.total_rows_written: int = 0
 
-        # Write header (overwrite on fresh start)
-        try:
-            with open(self.csv_filename, "w", newline="", encoding="utf-8") as fh:
-                writer = csv.DictWriter(fh, fieldnames=FIELDNAMES)
-                writer.writeheader()
-        except OSError as exc:
-            print(f"[TelemetryLogger] WARNING: Could not initialise CSV: {exc}")
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(csv_filename) or ".", exist_ok=True)
+
+        self._file = open(csv_filename, "w", newline="", encoding="utf-8")
+        self._writer = csv.DictWriter(self._file, fieldnames=_FIELDNAMES)
+        self._writer.writeheader()
 
     # ------------------------------------------------------------------
-    # Assignment logging
+    # Logging helpers
     # ------------------------------------------------------------------
     def log_call_assignment(
         self,
@@ -76,39 +67,36 @@ class TelemetryLogger:
         elevator_id: int,
         gbfs_score: float,
         weights: dict,
-        traffic_intensity: float,
-        elevator_load_kg: float = 0.0,
+        traffic_intensity: int,
+        elevator_load_kg: float,
     ) -> None:
-        """Log the moment GBFS assigns a call to an elevator."""
+        """Record an elevator assignment event."""
         row = {
-            "timestamp": datetime.now().isoformat(),
+            "event_type": "ASSIGNMENT",
             "call_id": call_id,
             "origin_floor": passenger.origin_floor,
             "dest_floor": passenger.dest_floor,
-            "call_priority": passenger.priority,
-            "assigned_elevator_id": elevator_id,
-            "pickup_time_actual_sec": None,
-            "dropoff_time_sec": None,
-            "elevator_load_kg_at_pickup": round(elevator_load_kg, 1),
-            "wait_time_sec": None,
-            "travel_time_sec": None,
-            "direction_match": 1.0 if passenger.direction == "UP" else 0.0,
-            "traffic_intensity": round(traffic_intensity, 2),
-            "hour_of_day": datetime.now().hour,
+            "direction": passenger.direction,
+            "priority": passenger.priority,
+            "elevator_id": elevator_id,
             "gbfs_score": round(gbfs_score, 4),
-            "astar_cost": None,
-            "direction_weight": round(weights.get("direction_bias", 0), 4),
-            "load_weight": round(weights.get("load_balance", 0), 4),
-            "distance_weight": round(weights.get("distance", 0), 4),
-            "wait_weight": round(weights.get("wait_time", 0), 4),
-            "reopt_triggered": 0,
-            "reopt_count": 0,
+            "weight_direction_bias": round(weights.get("direction_bias", 0), 4),
+            "weight_load_balance": round(weights.get("load_balance", 0), 4),
+            "weight_distance": round(weights.get("distance", 0), 4),
+            "weight_wait_time": round(weights.get("wait_time", 0), 4),
+            "weight_emergency_bonus": round(weights.get("emergency_bonus", 0), 4),
+            "weight_fairness": round(weights.get("fairness", 0), 4),
+            "traffic_intensity": traffic_intensity,
+            "elevator_load_kg": round(elevator_load_kg, 1),
+            "wait_time_sec": "",
+            "travel_time_sec": "",
+            "total_time_sec": "",
+            "astar_cost": "",
+            "reopt_count": "",
         }
-        self._append(row)
+        self._writer.writerow(row)
+        self.total_rows_written += 1
 
-    # ------------------------------------------------------------------
-    # Completion logging
-    # ------------------------------------------------------------------
     def log_call_completion(
         self,
         call_id: str,
@@ -116,76 +104,53 @@ class TelemetryLogger:
         elevator_id: int,
         astar_cost: float,
         reopt_count: int,
-        traffic_intensity: float = 0.0,
+        traffic_intensity: int,
     ) -> None:
-        """Log the moment a passenger is dropped off."""
-        wait = passenger.waiting_time_sec() or 0.0
-        travel = passenger.travel_time_sec() or 0.0
-
+        """Record a call completion event."""
         row = {
-            "timestamp": datetime.now().isoformat(),
+            "event_type": "COMPLETION",
             "call_id": call_id,
             "origin_floor": passenger.origin_floor,
             "dest_floor": passenger.dest_floor,
-            "call_priority": passenger.priority,
-            "assigned_elevator_id": elevator_id,
-            "pickup_time_actual_sec": round(wait, 2),
-            "dropoff_time_sec": round(
-                passenger.dropoff_time.timestamp(), 2
-            )
-            if passenger.dropoff_time
-            else None,
-            "elevator_load_kg_at_pickup": None,
-            "wait_time_sec": round(wait, 2),
-            "travel_time_sec": round(travel, 2),
-            "direction_match": 1.0 if passenger.direction == "UP" else 0.0,
-            "traffic_intensity": round(traffic_intensity, 2),
-            "hour_of_day": datetime.now().hour,
-            "gbfs_score": None,
+            "direction": passenger.direction,
+            "priority": passenger.priority,
+            "elevator_id": elevator_id,
+            "gbfs_score": "",
+            "weight_direction_bias": "",
+            "weight_load_balance": "",
+            "weight_distance": "",
+            "weight_wait_time": "",
+            "weight_emergency_bonus": "",
+            "weight_fairness": "",
+            "traffic_intensity": traffic_intensity,
+            "elevator_load_kg": "",
+            "wait_time_sec": round(passenger.waiting_time_sec() or 0, 2),
+            "travel_time_sec": round(passenger.travel_time_sec() or 0, 2),
+            "total_time_sec": round(passenger.total_time_sec() or 0, 2),
             "astar_cost": round(astar_cost, 2),
-            "direction_weight": None,
-            "load_weight": None,
-            "distance_weight": None,
-            "wait_weight": None,
-            "reopt_triggered": 1 if reopt_count > 0 else 0,
             "reopt_count": reopt_count,
         }
-        self._append(row)
+        self._writer.writerow(row)
+        self.total_rows_written += 1
 
     # ------------------------------------------------------------------
-    # Buffer management
+    # Legacy compatibility
     # ------------------------------------------------------------------
-    def _append(self, row: dict) -> None:
-        self.buffer.append(row)
-        if len(self.buffer) >= self.buffer_size:
-            self.flush()
+    def log_event(self, **kwargs) -> None:
+        """Generic event logger for backward compatibility."""
+        row = {k: kwargs.get(k, "") for k in _FIELDNAMES}
+        row["event_type"] = kwargs.get("event_type", "GENERIC")
+        self._writer.writerow(row)
+        self.total_rows_written += 1
 
-    def flush(self) -> None:
-        """Write the in-memory buffer to the CSV file."""
-        if not self.buffer:
-            return
-        try:
-            with open(
-                self.csv_filename, "a", newline="", encoding="utf-8"
-            ) as fh:
-                writer = csv.DictWriter(fh, fieldnames=FIELDNAMES)
-                writer.writerows(self.buffer)
-            self.total_rows_written += len(self.buffer)
-            self.buffer.clear()
-        except OSError as exc:
-            print(f"[TelemetryLogger] ERROR writing CSV: {exc}")
-
+    # ------------------------------------------------------------------
+    # Cleanup
+    # ------------------------------------------------------------------
     def close(self) -> None:
-        """Flush remaining buffer."""
-        self.flush()
+        """Flush and close the CSV file."""
+        if self._file and not self._file.closed:
+            self._file.flush()
+            self._file.close()
 
-    # ------------------------------------------------------------------
-    # Stats
-    # ------------------------------------------------------------------
-    def stats(self) -> dict:
-        return {
-            "csv_file": self.csv_filename,
-            "rows_written": self.total_rows_written,
-            "rows_buffered": len(self.buffer),
-            "columns": len(FIELDNAMES),
-        }
+    def __del__(self) -> None:
+        self.close()

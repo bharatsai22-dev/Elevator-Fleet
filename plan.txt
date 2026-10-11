@@ -1,0 +1,702 @@
+Modified Abstract
+Heuristic Elevator Fleet Dispatcher Using A* State-Space Search
+Most elevator systems still rely on first-come-first-served logic, which works well when traffic is light but can become inefficient during peak hours, when passengers may experience longer waiting times and unnecessary elevator movement. This project models elevator dispatching as a state-space search problem using the A* algorithm. Whenever a passenger request arrives, the system evaluates possible elevator assignments and searches for a suitable route based on the current elevator positions, passenger requests, travel cost, and capacity constraints.
+The core of the system is the A* evaluation function, f(n) = g(n) + h(n), where g(n) represents the cost accumulated so far and h(n) estimates the remaining cost to reach the desired state. This allows the dispatcher to consider both the current movement cost and the estimated future cost instead of simply selecting the nearest elevator. A hard capacity constraint is also enforced, so an elevator that reaches its passenger limit cannot accept additional passengers.
+To make the decision-making process transparent, the system provides a live visual interface showing elevator movements, floor queues, passenger requests, and the selected A* path. A console log can also display the search decisions and cost values behind each assignment, making the algorithm easier to observe and explain.
+Overall, the project demonstrates how A* state-space search with capacity constraints can be applied to elevator fleet dispatching to reduce unnecessary movement and improve passenger service during changing traffic conditions.
+🚀 Project Implementation Plan
+Project Title
+Heuristic Elevator Fleet Dispatcher Using A* State-Space Search
+Core Technology Stack
+Layer
+Technology
+Purpose
+Programming
+Python
+Core simulation + A* algorithm
+Frontend / GUI
+Streamlit
+Interactive elevator dashboard
+Backend API
+FastAPI
+Connect GUI with simulation/algorithm
+Visualization
+Plotly
+Live elevator/floor charts
+Data
+JSON / SQLite
+Requests, logs, simulation history
+Algorithm
+A*
+Elevator selection and state-space search
+Important
+I recommend FastAPI + Streamlit, not Flask.
+FastAPI → backend/API 
+Streamlit → impressive interactive GUI 
+Python → simulation + A* 
+Plotly → visualizations 
+You don't need Flask if FastAPI is being used.
+
+1. Overall Architecture
+The application should work like this:
+                    ┌─────────────────────────┐
+                    │       STREAMLIT         │
+                    │     Interactive GUI     │
+                    └────────────┬────────────┘
+                                 │
+                                 │ REST API
+                                 ▼
+                    ┌─────────────────────────┐
+                    │        FASTAPI          │
+                    │      Backend API        │
+                    └────────────┬────────────┘
+                                 │
+              ┌──────────────────┼──────────────────┐
+              │                  │                  │
+              ▼                  ▼                  ▼
+       ┌─────────────┐   ┌──────────────┐   ┌──────────────┐
+       │ A* Dispatcher│   │  Elevator    │   │ Passenger    │
+       │   Engine     │   │  Simulator   │   │ Request      │
+       └─────────────┘   └──────────────┘   └──────────────┘
+              │                  │                  │
+              └──────────────────┼──────────────────┘
+                                 ▼
+                       ┌──────────────────┐
+                       │  State Manager   │
+                       └────────┬─────────┘
+                                ▼
+                       ┌──────────────────┐
+                       │ SQLite / JSON    │
+                       │ Logs & History   │
+                       └──────────────────┘
+
+2. Main Application Screen
+The GUI should look like an actual Elevator Control Center.
+Dashboard
+┌──────────────────────────────────────────────────────────────┐
+│       ELEVATOR AI DISPATCH CONTROL CENTER                   │
+│       A* State-Space Optimization                            │
+├────────────┬─────────────────────────────────────────────────┤
+│            │                                                 │
+│ Dashboard  │          BUILDING VISUALIZATION                │
+│            │                                                 │
+│ Elevators  │     ┌───┐       ┌───┐       ┌───┐             │
+│            │ 10  │ E1│       │ E2│       │ E3│             │
+│ Requests   │  9  │ ↑ │       │   │       │ ↑ │             │
+│            │  8  │   │       │   │       │   │             │
+│ A* Engine  │  7  │   │       │ ↓ │       │   │             │
+│            │  6  │   │       │   │       │   │             │
+│ Analytics  │  5  │   │       │   │       │   │             │
+│            │  4  │   │       │   │       │   │             │
+│ Settings   │  3  │   │       │   │       │   │             │
+│            │  2  │   │       │   │       │   │             │
+│            │  1  │   │       │   │       │   │             │
+│            │     └───┘       └───┘       └───┘             │
+├────────────┴─────────────────────────────────────────────────┤
+│ Active Requests │ Avg Wait │ Completed │ A* Decisions       │
+│       08        │  12.4 s  │    142    │       387          │
+└──────────────────────────────────────────────────────────────┘
+The goal is that when you demonstrate it to your faculty, they can visually see the elevators moving and understand why A* selected an elevator.
+
+3. Elevator Simulation
+Start with something manageable:
+Building
+Floors: 10
+Elevators: 4
+Capacity: 6 passengers/elevator
+Each elevator has:
+Elevator:
+    id
+    current_floor
+    target_floor
+    direction
+    capacity
+    passengers
+    status
+Possible states:
+IDLE
+MOVING_UP
+MOVING_DOWN
+DOOR_OPEN
+FULL
+
+4. Passenger Request System
+The user should be able to create requests from the GUI.
+Example:
+New Passenger Request
+
+From Floor: [ 2 ]
+
+To Floor:   [ 9 ]
+
+Passengers: [ 1 ]
+
+             [ REQUEST ELEVATOR ]
+The system receives:
+Passenger P104
+2 → 9
+Then A* starts searching.
+
+5. The A* Algorithm — Main Intelligence
+This is the most important part of your project.
+Instead of:
+Nearest elevator → select
+your system does:
+Request
+   ↓
+Generate possible states
+   ↓
+A* Search
+   ↓
+Evaluate movement cost
+   ↓
+Apply capacity constraint
+   ↓
+Select optimal/lowest-cost valid state
+   ↓
+Assign elevator
+
+6. State Representation
+A state can represent the condition of the elevator system.
+For example:
+State =
+(
+ E1 floor,
+ E2 floor,
+ E3 floor,
+ E4 floor,
+ passenger requests
+)
+Example:
+Current State:
+
+E1 = Floor 2
+E2 = Floor 7
+E3 = Floor 4
+E4 = Floor 9
+
+Request = 3 → 8
+A* explores possible assignment states.
+7. A* Cost Function
+Use the standard:
+f(n)=g(n)+h(n)f(n)=g(n)+h(n) 
+g(n)
+Cost already incurred.
+For example:
+distance travelled
++
+waiting cost
++
+movement cost
+h(n)
+Estimated remaining cost.
+For the project, keep the heuristic understandable.
+For example:
+h(n)=∣current_floor−target_floor∣h(n)=|current\_floor-target\_floor| 
+You can later extend it with passenger waiting distance.
+
+8. Capacity Constraint
+This should remain because it makes the project more realistic.
+Example:
+Elevator E1
+
+Capacity = 6
+Current passengers = 6
+
+Request = +1 passenger
+
+→ E1 is NOT a valid state
+A* should discard that state.
+             A* Search
+                 │
+       ┌─────────┼─────────┐
+       ▼         ▼         ▼
+      E1        E2        E3
+    FULL       Valid     Valid
+      X          │         │
+                 ▼         ▼
+             Calculate cost
+                 │
+                 ▼
+              Select
+
+9. Live Elevator Movement
+This is where your project becomes visually impressive.
+When A* selects:
+E2 → Request Floor 3 → Floor 8
+the GUI should animate:
+Floor 10
+│
+│
+│       E2
+│       ↓
+│
+│
+│
+│       E2
+│       ↓
+│
+│
+Floor 3 ─── Passenger
+Then:
+Doors Opening
+      ↓
+Passenger enters
+      ↓
+E2 → Floor 8
+      ↓
+Passenger exits
+      ↓
+Request completed
+
+10. GUI Pages
+Don't put everything on one screen.
+Create a sidebar:
+🏠 Dashboard
+Real-time overview.
+Show:
+Building 
+Elevators 
+Current floor 
+Direction 
+Passenger count 
+Active requests 
+System status 
+
+🛗 Elevator Fleet
+Detailed elevator information.
+E1
+Current Floor: 7
+Direction: UP
+Passengers: 3/6
+Status: MOVING
+
+E2
+Current Floor: 2
+Direction: IDLE
+Passengers: 0/6
+Status: AVAILABLE
+
+👥 Passenger Requests
+Display:
+Request ID | From | To | Passengers | Status
+------------------------------------------------
+P101       | 2    | 8  | 2          | Assigned
+P102       | 6    | 1  | 1          | Waiting
+P103       | 4    | 9  | 3          | Completed
+
+🧠 A* Engine
+This will be particularly useful during your project demonstration.
+Show:
+NEW REQUEST
+
+Passenger: P104
+From: 3
+To: 9
+
+A* SEARCH
+
+E1 → Cost: 18
+E2 → Cost: 11
+E3 → Cost: 15
+E4 → INVALID (Capacity)
+
+Selected:
+E2
+
+f(n) = g(n) + h(n)
+
+g(n) = 7
+h(n) = 4
+
+f(n) = 11
+This makes your algorithm visible, rather than hiding it inside Python code.
+
+11. Analytics Page
+Use Plotly.
+Display:
+Average Waiting Time
+Time
+ │
+ │       ╭─╮
+ │    ╭──╯ ╰──╮
+ │ ╭──╯       ╰──
+ └────────────────
+Elevator Utilization
+E1 ███████████
+E2 ████████
+E3 ██████████
+E4 █████
+Completed Requests
+Requests
+ 150 │                 ●
+ 100 │           ●─────
+  50 │      ●────
+   0 │ ●────
+     └────────────────
+Metrics
+Average Waiting Time
+12.4 sec
+
+Average Travel Time
+18.7 sec
+
+Completed Requests
+142
+
+Rejected Due to Capacity
+13
+
+A* Decisions
+387
+
+12. Simulation Controls
+Add a control panel:
+Simulation
+
+[▶ Start]
+
+[⏸ Pause]
+
+[↻ Reset]
+
+Simulation Speed
+[━━━━━━●━━]
+
+Traffic Mode
+
+○ Normal
+○ Peak
+○ Random
+○ Custom
+Peak Mode
+Automatically generate many requests.
+For example:
+Floor 1 → 8
+Floor 1 → 6
+Floor 3 → 10
+Floor 2 → 7
+Floor 5 → 9
+...
+This allows you to demonstrate how the dispatcher behaves under heavy traffic.
+
+13. Traffic Modes
+This can make the project much stronger.
+Normal
+Low number of requests.
+Peak
+Many simultaneous requests.
+Up-Peak
+Most passengers:
+Ground → upper floors
+Down-Peak
+Most passengers:
+Upper floors → Ground
+Random
+Randomly generated requests.
+
+14. Backend API
+FastAPI handles communication.
+Example endpoints:
+POST /request
+Create passenger request.
+GET /elevators
+Get current elevator states.
+GET /requests
+Get passenger requests.
+POST /dispatch
+Run A* dispatcher.
+POST /simulation/start
+Start simulation.
+POST /simulation/reset
+Reset building.
+GET /analytics
+Get performance metrics.
+
+15. Recommended Folder Structure
+Keep it professional:
+elevator-ai-dispatcher/
+│
+├── backend/
+│   ├── main.py
+│   ├── api/
+│   │   ├── elevator_routes.py
+│   │   ├── request_routes.py
+│   │   └── simulation_routes.py
+│   │
+│   ├── algorithms/
+│   │   ├── astar.py
+│   │   ├── heuristic.py
+│   │   └── state.py
+│   │
+│   ├── simulation/
+│   │   ├── elevator.py
+│   │   ├── passenger.py
+│   │   └── simulator.py
+│   │
+│   └── models/
+│       └── schemas.py
+│
+├── frontend/
+│   ├── app.py
+│   ├── pages/
+│   │   ├── dashboard.py
+│   │   ├── elevators.py
+│   │   ├── requests.py
+│   │   ├── astar.py
+│   │   └── analytics.py
+│   │
+│   ├── components/
+│   │   ├── building.py
+│   │   ├── elevator_card.py
+│   │   └── metrics.py
+│   │
+│   └── assets/
+│
+├── data/
+│   └── simulation.db
+│
+├── tests/
+│   ├── test_astar.py
+│   ├── test_elevator.py
+│   └── test_simulation.py
+│
+├── requirements.txt
+├── README.md
+└── run.py
+16. Development Phases
+Don't try to build the GUI first.
+Build it in this order.
+Phase 1 — Core Elevator Model
+Day 1–3
+Implement:
+Elevator 
+Building 
+Floors 
+Passenger 
+Requests 
+Capacity 
+Elevator movement 
+First make it work entirely in Python.
+
+Phase 2 — A* Engine
+Day 4–7
+Implement:
+State
+↓
+Successor generation
+↓
+g(n)
+↓
+h(n)
+↓
+f(n)
+↓
+Priority Queue
+↓
+Goal state
+Test A* independently.
+Example:
+Request: 2 → 9
+
+E1: floor 1
+E2: floor 5
+E3: floor 8
+
+A*:
+E1 → cost 12
+E2 → cost 8
+E3 → cost 10
+
+Selected → E2
+
+Phase 3 — Simulation Engine
+Day 8–12
+Connect:
+Passenger request
+        ↓
+A*
+        ↓
+Elevator assignment
+        ↓
+Elevator movement
+        ↓
+Passenger pickup
+        ↓
+Destination
+        ↓
+Request completion
+At this stage, you should have a completely working terminal-based elevator simulator.
+
+Phase 4 — FastAPI
+Day 13–15
+Create the API.
+Test through FastAPI's Swagger interface:
+http://localhost:8000/docs
+You should be able to create requests and retrieve elevator states from the API.
+
+Phase 5 — Streamlit GUI
+Day 16–22
+Build:
+Dashboard 
+Elevator fleet 
+Passenger requests 
+A* visualization 
+Simulation controls 
+Analytics 
+
+Phase 6 — Visual Upgrade
+Day 23–27
+Make it look like a major project.
+Add:
+Dark control-center theme 
+Elevator animations 
+Building visualization 
+Live status indicators 
+Animated metrics 
+Plotly graphs 
+A* search visualization 
+Request notifications 
+System activity log 
+
+Phase 7 — Testing & Comparison
+Day 28–32
+This is very important for your major project report.
+Run different traffic conditions.
+Record:
+Number of passengers
+Average waiting time
+Average travel time
+Total elevator distance
+Completed requests
+Capacity rejections
+You can also compare your A* dispatcher against a simple baseline such as nearest-elevator/FCFS as an experimental reference, without making the baseline part of the proposed algorithm.
+Example results table:
+Traffic
+Requests
+Avg Wait
+Avg Travel
+Distance
+Normal
+50
+—
+—
+—
+Medium
+100
+—
+—
+—
+Peak
+200
+—
+—
+—
+You will fill these values from your actual simulation.
+
+17. Final Demonstration Flow
+Your project presentation can be extremely clear:
+Step 1
+Open the dashboard.
+4 Elevators
+10 Floors
+Capacity = 6
+Step 2
+Generate passenger request:
+Floor 2 → Floor 9
+Step 3
+Show A*:
+Candidate states
+       ↓
+Cost calculation
+       ↓
+Heuristic
+       ↓
+A* evaluation
+       ↓
+Elevator E3 selected
+Step 4
+Watch E3 move:
+Floor 7
+  ↓
+Floor 6
+  ↓
+Floor 5
+  ↓
+Floor 4
+  ↓
+Floor 3
+  ↓
+Floor 2
+Passenger enters.
+Step 5
+E3 travels to Floor 9.
+Step 6
+Dashboard updates:
+Request Completed ✓
+
+Waiting Time: 8.2 sec
+Travel Time: 15.4 sec
+A* Cost: 11
+That gives you a complete working story, rather than simply showing an algorithm.
+
+18. Features to Keep vs Avoid
+✅ Must Have
+Python 
+A* 
+State-space representation 
+Elevator simulation 
+Multiple elevators 
+Multiple floors 
+Passenger requests 
+Capacity constraint 
+Real-time movement 
+Streamlit GUI 
+FastAPI 
+Plotly analytics 
+A* decision visualization 
+Simulation logs 
+🟡 Add Later
+Peak-hour simulation 
+Random traffic generation 
+Performance comparison 
+SQLite 
+Downloadable simulation report 
+Custom building configuration 
+❌ Don't add initially
+Machine Learning 
+Deep Learning 
+IoT 
+LLM 
+Computer Vision 
+complicated cloud infrastructure 
+Your project is fundamentally an A* state-space search problem. Adding unrelated AI technologies could make the implementation unnecessarily complicated and weaken the explanation of the actual algorithm.
+
+19. Final Technology Stack
+             ELEVATOR AI DISPATCHER
+                       │
+        ┌──────────────┴──────────────┐
+        │                             │
+   STREAMLIT                       FASTAPI
+   Frontend                        Backend
+        │                             │
+        └──────────────┬──────────────┘
+                       │
+                    PYTHON
+                       │
+             ┌─────────┴─────────┐
+             │                   │
+          A* ENGINE          SIMULATOR
+             │                   │
+             └─────────┬─────────┘
+                       │
+                  STATE MANAGER
+                       │
+                 SQLite / JSON
+                       │
+                    Plotly
+The development principle
+Don't start with Streamlit.
+Start:
+Python Elevator Model → A* → Simulation → FastAPI → Streamlit → Visualization → Analytics → Testing
+That way, if the GUI has problems, your core major-project algorithm is already complete and independently testable.

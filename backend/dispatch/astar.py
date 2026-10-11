@@ -190,8 +190,9 @@ class AStarSequencer:
                 "cost_increase_percent": 0.0,
             }
 
-        # Remove current floor from the 'to-visit' set if present
-        to_visit = [f for f in pending if f != elevator.current_floor]
+        # We MUST include the current floor if there is a pending call here,
+        # otherwise we'll skip picking up passengers at our current floor!
+        to_visit = list(pending)
 
         # --- baseline cost (current queue order) ---
         baseline_path = [elevator.current_floor] + to_visit
@@ -251,15 +252,15 @@ class AStarSequencer:
     @staticmethod
     def _apply_route(elevator: "Elevator", sequence: list[int]) -> None:
         """
-        Overwrite elevator queues with the A*-optimised sequence.
-        Express queue is left intact (highest priority).
+        Apply the A*-optimised sequence directly to the elevator.
+        This forces the elevator to abandon standard SCAN sweeps 
+        and exactly follow the TSP optimal path.
         """
         optimised_floors = sequence[1:]  # skip current_floor
-        express = set(elevator.express_queue)
-
-        elevator.up_queue = [
-            f for f in optimised_floors if f > elevator.current_floor and f not in express
-        ]
-        elevator.down_queue = [
-            f for f in optimised_floors if f < elevator.current_floor and f not in express
-        ]
+        
+        elevator.target_sequence = list(optimised_floors)
+        
+        # We must clear the base queues so they don't interfere with the sequence.
+        # But express queues stay intact.
+        elevator.up_queue.clear()
+        elevator.down_queue.clear()

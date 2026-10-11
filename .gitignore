@@ -13,10 +13,21 @@ ENV/
 env.bak/
 venv.bak/
 
-# Data
+# Data & Databases
 data/
 *.csv
+*.db
+*.sqlite3
 
 # Editor
 .vscode/
 .idea/
+
+# Web App & Build
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+*.log
+npm-debug.log*
+

@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -56,8 +57,20 @@ from backend.analytics.metrics import MetricsCollector
 # ═══════════════════════════════════════════════════════════════════════════
 app = FastAPI(title="Elevator Fleet Dashboard")
 
+# CORS — allow Vite dev server and any local frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Serve frontend static files
 _frontend_dir = os.path.join(_project_root, "frontend")
+_webapp_dist = os.path.join(_project_root, "web-app", "dist")
+if os.path.isdir(_webapp_dist):
+    _frontend_dir = _webapp_dist
 if os.path.isdir(_frontend_dir):
     app.mount("/static", StaticFiles(directory=_frontend_dir), name="static")
 
@@ -134,6 +147,7 @@ class SimState:
         self.total_steps: int = self.config["simulation"]["duration_steps"]
 
         self.running: bool = False
+        self.mode: str = getattr(self, "mode", "auto")
         self.active_passengers: dict[str, dict] = {}
         self.recent_decisions: list[dict] = []
 
@@ -198,7 +212,10 @@ def _run_step(s: SimState) -> None:
     s.sim_time += timedelta(seconds=s.time_per_step)
 
     # 1. Generate calls
-    calls = s.traffic.generate_calls(s.sim_time, s.time_per_step)
+    if getattr(s, "mode", "auto") == "auto":
+        calls = s.traffic.generate_calls(s.sim_time, s.time_per_step)
+    else:
+        calls = []
     for _, _, priority, _ in calls:
         s.metrics.record_call(priority)
 
@@ -229,9 +246,6 @@ def _run_step(s: SimState) -> None:
             elevator.add_express_call(floor)
         else:
             elevator.add_to_queue(floor, direction)
-
-        dest_dir = "UP" if dest > floor else "DOWN"
-        elevator.add_to_queue(dest, dest_dir)
 
         s.active_passengers[call_id] = {
             "passenger": passenger,
@@ -294,11 +308,24 @@ def _next_target(elevator: Elevator) -> int | None:
         return min(elevator.express_queue, key=lambda f: abs(f - elevator.current_floor))
 
     passenger_dests = [p.dest_floor for p in elevator.passengers]
-    above = sorted(f for f in elevator.up_queue + passenger_dests if f >= elevator.current_floor)
-    below = sorted(
-        (f for f in elevator.down_queue + passenger_dests if f <= elevator.current_floor),
-        reverse=True,
-    )
+    
+    # If the elevator is full, it must ignore pickups and focus ONLY on dropoffs
+    if len(elevator.passengers) >= elevator.max_passengers:
+        above = sorted(f for f in passenger_dests if f >= elevator.current_floor)
+        below = sorted(
+            (f for f in passenger_dests if f <= elevator.current_floor),
+            reverse=True,
+        )
+    else:
+        # We can respect the target_sequence if we have capacity
+        if hasattr(elevator, "target_sequence") and elevator.target_sequence:
+            return elevator.target_sequence[0]
+            
+        above = sorted(f for f in elevator.up_queue + passenger_dests if f >= elevator.current_floor)
+        below = sorted(
+            (f for f in elevator.down_queue + passenger_dests if f <= elevator.current_floor),
+            reverse=True,
+        )
 
     if elevator.direction == "UP":
         return above[0] if above else (below[0] if below else None)
@@ -339,6 +366,7 @@ def _handle_arrival(s: SimState, elevator: Elevator, floor: int) -> None:
         if elevator.board_passenger(pax):
             pax.pickup_time = s.sim_time
             rec["state"] = "ONBOARD"
+            s.building.remove_call(pax.origin_floor, pax.direction, pax.priority)
         else:
             s.metrics.record_rejection()
 
@@ -354,6 +382,9 @@ def _handle_arrival(s: SimState, elevator: Elevator, floor: int) -> None:
             elevator.down_queue.remove(floor)
         if floor in elevator.express_queue:
             elevator.express_queue.remove(floor)
+            
+    if hasattr(elevator, "target_sequence") and floor in elevator.target_sequence:
+        elevator.target_sequence.remove(floor)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -399,6 +430,7 @@ def _build_snapshot(s: SimState) -> dict:
         "running": s.running,
         "strategy": s.strategy_name,
         "scenario": s.scenario_name,
+        "mode": getattr(s, "mode", "auto"),
         "speed": s.speed,
         "num_floors": s.building.num_floors,
         "elevators": elevators,
@@ -502,6 +534,87 @@ async def reset():
 async def set_speed(speed: float = 1.0):
     sim.speed = max(0.1, min(50.0, speed))
     return {"speed": sim.speed}
+
+
+class ManualCallRequest(BaseModel):
+    from_floor: int = 1
+    to_floor: int = 8
+    count: int = 1
+    elevator_id: int | None = None
+
+
+class ElevatorToggleRequest(BaseModel):
+    elevator_id: int
+
+
+@app.post("/api/toggle_elevator")
+async def toggle_elevator(req: ElevatorToggleRequest):
+    if 0 <= req.elevator_id < len(sim.building.elevators):
+        elevator = sim.building.elevators[req.elevator_id]
+        elevator.is_operational = not elevator.is_operational
+        if not elevator.is_operational:
+            elevator.direction = "IDLE"
+        return {"status": "success", "operational": elevator.is_operational}
+    return {"status": "error"}
+
+
+@app.post("/api/manual_call")
+async def manual_call(req: ManualCallRequest):
+    """Inject a manual passenger call into the simulation."""
+    direction = "UP" if req.to_floor > req.from_floor else "DOWN"
+    for _ in range(req.count):
+        call_id = sim.building.add_call(req.from_floor, direction, "NORMAL")
+        passenger = Passenger(
+            passenger_id=call_id,
+            origin_floor=req.from_floor,
+            dest_floor=req.to_floor,
+            priority="NORMAL",
+            direction=direction,
+            request_time=sim.sim_time,
+            weight_kg=75.0,
+        )
+        if isinstance(sim.dispatcher, GBFSDispatcher):
+            sim.dispatcher.register_pending_call(call_id, sim.sim_time.timestamp())
+        if req.elevator_id is not None and 0 <= req.elevator_id < len(sim.building.elevators):
+            eid = req.elevator_id
+            est_wait = 0.0
+            decision = {"best_score": 999.0}
+        else:
+            eid, est_wait, decision = sim.dispatcher.assign_elevator(
+                req.from_floor, direction, "NORMAL"
+            )
+        elevator = sim.building.elevators[eid]
+        elevator.add_to_queue(req.from_floor, direction)
+        
+        sim.active_passengers[call_id] = {
+            "passenger": passenger,
+            "elevator_id": eid,
+            "direction": direction,
+            "state": "WAITING",
+            "reopt_count": 0,
+        }
+        sim.recent_decisions.append({
+            "step": sim.step,
+            "floor": req.from_floor,
+            "direction": direction,
+            "priority": "NORMAL",
+            "dest": req.to_floor,
+            "elevator": eid,
+            "score": round(decision.get("best_score", 0), 2),
+            "wait_est": round(est_wait, 1),
+        })
+    return {"status": "ok", "calls_added": req.count}
+
+
+class SimModeRequest(BaseModel):
+    mode: str = "manual"  # "auto" or "manual"
+
+
+@app.post("/api/sim/mode")
+async def set_sim_mode(req: SimModeRequest):
+    """Toggle simulation auto/manual mode."""
+    sim.mode = req.mode
+    return {"status": "ok", "mode": req.mode}
 
 
 # ═══════════════════════════════════════════════════════════════════════════

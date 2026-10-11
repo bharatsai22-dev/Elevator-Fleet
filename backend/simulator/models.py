@@ -83,6 +83,7 @@ class Elevator:
     down_queue: list = field(default_factory=list)
     express_queue: list = field(default_factory=list)
     vip_queue: list = field(default_factory=list)
+    target_sequence: list = field(default_factory=list)
 
     # Physical constraints
     max_load_kg: float = 1000.0
@@ -149,10 +150,10 @@ class Elevator:
         if self.fire_mode:
             return
         if direction == "UP":
-            if floor not in self.up_queue:
+            if floor not in self.up_queue and floor not in self.target_sequence:
                 self.up_queue.append(floor)
         elif direction == "DOWN":
-            if floor not in self.down_queue:
+            if floor not in self.down_queue and floor not in self.target_sequence:
                 self.down_queue.append(floor)
 
     def add_express_call(self, floor: int, is_vip: bool = False) -> None:
@@ -168,14 +169,28 @@ class Elevator:
 
     def has_pending_stops(self) -> bool:
         """True if any queue still has work."""
-        return bool(self.up_queue or self.down_queue or self.express_queue or self.vip_queue)
+        return bool(self.up_queue or self.down_queue or self.express_queue or self.vip_queue or self.target_sequence)
+
+    def is_full(self) -> bool:
+        """True if the elevator is at maximum capacity."""
+        return len(self.passengers) >= self.max_passengers
 
     def all_pending_floors(self) -> list:
         """Return a de-duplicated list of all floors this elevator must visit."""
-        floors = set(self.up_queue) | set(self.down_queue) | set(self.express_queue) | set(self.vip_queue)
-        # Also include destination floors of on-board passengers
+        floors = set()
+        
+        # Only consider pickup queues if we have space for more passengers
+        if not self.is_full():
+            floors |= set(self.up_queue)
+            floors |= set(self.down_queue)
+            floors |= set(self.express_queue)
+            floors |= set(self.vip_queue)
+            floors |= set(self.target_sequence)
+            
+        # Always consider dropoff locations for passengers currently onboard
         for p in self.passengers:
             floors.add(p.dest_floor)
+            
         return sorted(floors)
 
     # ------------------------------------------------------------------
@@ -208,6 +223,7 @@ class Elevator:
         self.down_queue.clear()
         self.express_queue.clear()
         self.vip_queue.clear()
+        self.target_sequence.clear()
         # The engine will need to handle moving it to floor 1 and keeping doors open.
         
     def set_out_of_service(self) -> None:
@@ -217,6 +233,7 @@ class Elevator:
         self.down_queue.clear()
         self.express_queue.clear()
         self.vip_queue.clear()
+        self.target_sequence.clear()
 
     def __repr__(self) -> str:
         return (

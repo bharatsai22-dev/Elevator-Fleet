@@ -178,7 +178,9 @@ class SimulationEngine:
                 priority=priority,
                 direction=direction,
                 request_time=self.sim_time,
-                weight_kg=float(np.clip(self.rng.normal(75, 15), 40, 120)),
+                # Log-Normal Distribution: Mean ~75kg, Std ~15kg
+                # Mathematically prevents negative weights and naturally models real populations
+                weight_kg=float(self.rng.lognormal(4.297, 0.198)),
             )
 
             # Register pending call in GBFS starvation tracker
@@ -209,9 +211,9 @@ class SimulationEngine:
             else:
                 elevator.add_to_queue(floor, direction)
 
-            # Also queue the destination floor
-            dest_dir = "UP" if dest > floor else "DOWN"
-            elevator.add_to_queue(dest, dest_dir)
+            # We do NOT queue the destination floor here.
+            # The destination will be dynamically added to pending floors
+            # when the passenger actually boards the elevator.
 
             # Track passenger in-flight
             self._active_passengers[call_id] = {
@@ -233,6 +235,11 @@ class SimulationEngine:
                 traffic_intensity=len(self.building.get_pending_calls()),
                 elevator_load_kg=elevator.total_load_kg,
             )
+
+            # Trigger A* reoptimization immediately so the elevator can adapt
+            # its route to intercept the new passenger on the fly.
+            if hasattr(self, "sequencer") and self.sequencer:
+                self.sequencer.optimize_route(elevator)
 
     # ------------------------------------------------------------------
     # Elevator movement
@@ -276,6 +283,10 @@ class SimulationEngine:
                 elevator.express_queue,
                 key=lambda f: abs(f - elevator.current_floor),
             )
+            
+        if elevator.target_sequence:
+            return elevator.target_sequence[0]
+
 
         # Also consider destination floors of on-board passengers
         passenger_dests = [p.dest_floor for p in elevator.passengers]
@@ -387,6 +398,14 @@ class SimulationEngine:
                 new_elevator.add_express_call(pax.origin_floor, is_vip=False)
             else:
                 new_elevator.add_to_queue(pax.origin_floor, rec["direction"])
+            if hasattr(self, "sequencer") and self.sequencer:
+                self.sequencer.optimize_route(new_elevator)
+
+        # If any passenger boarded, their destination floor is now active.
+        # Trigger an immediate A* reoptimization to sequence the drop-offs.
+        if len(boarding_ids) > len(rejected_ids):
+            if hasattr(self, "sequencer") and self.sequencer:
+                self.sequencer.optimize_route(elevator)
 
         # --- Clean queues only if no one is still waiting at this floor ---
         still_waiting_here = any(
@@ -398,7 +417,9 @@ class SimulationEngine:
                 elevator.up_queue.remove(floor)
             if floor in elevator.down_queue:
                 elevator.down_queue.remove(floor)
-            if floor in getattr(elevator, "vip_queue", []):
+            while getattr(elevator, "target_sequence", []) and elevator.target_sequence[0] == floor:
+                elevator.target_sequence.pop(0)
+            if getattr(elevator, "vip_queue", []) and floor in elevator.vip_queue:
                 elevator.vip_queue.remove(floor)
             if floor in elevator.express_queue:
                 elevator.express_queue.remove(floor)

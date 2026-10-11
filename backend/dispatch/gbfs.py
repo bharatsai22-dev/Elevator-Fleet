@@ -42,24 +42,18 @@ class GBFSDispatcher(DispatchStrategy):
     def __init__(self, building: "Building") -> None:
         self.building = building
 
-        # Initial weights (optimised for passenger wait-time)
+        # Initial weights for the requested f(e) formula
         self.weights: dict[str, float] = {
-            "direction_bias": 0.35,
-            "load_balance": 0.20,
-            "distance": 0.18,
-            "wait_time": 0.10,
-            "emergency_bonus": 0.05,
-            "fairness": 0.12,
+            "w1": -0.5,  # Negative because more waiting is worse
+            "w2": 0.8,   # Positive because more capacity is better
+            "w3": 1.2,   # Positive because it's subtracted: - (Distance Cost * W3)
         }
 
         # Hard bounds used by the Dynamic Weight Adjuster
         self.weight_bounds: dict[str, tuple[float, float]] = {
-            "direction_bias": (0.20, 0.50),
-            "load_balance": (0.10, 0.40),
-            "distance": (0.08, 0.30),
-            "wait_time": (0.05, 0.20),
-            "emergency_bonus": (0.02, 0.10),
-            "fairness": (0.05, 0.25),
+            "w1": (-1.0, 0.0),
+            "w2": (0.1, 1.5),
+            "w3": (0.5, 2.0),
         }
 
         # Occupancy threshold — elevators above this % skip NORMAL calls
@@ -135,40 +129,21 @@ class GBFSDispatcher(DispatchStrategy):
                 )
                 continue
 
-            # ---- 1. Direction bias (positional awareness) ----
-            dir_score = self._direction_score(elevator, floor, direction)
+            # ---- Calculate Requested Heuristic Terms ----
+            # Waiting Count (passengers on board + queued stops)
+            waiting_count = len(elevator.passengers) + len(elevator.up_queue) + len(elevator.down_queue)
+            
+            # Available Capacity
+            available_capacity = elevator.max_passengers - len(elevator.passengers)
+            
+            # Distance Cost
+            distance_cost = abs(elevator.current_floor - floor)
 
-            # ---- 2. Load balance (higher → less loaded → better) ----
-            load_score = 1.0 - (elevator.occupancy_percent() / 100.0)
-
-            # ---- 3. Distance (closer → better, normalised to 0-1) ----
-            max_dist = max(self.building.num_floors - 1, 1)
-            manhattan = abs(elevator.current_floor - floor)
-            distance_score = 1.0 - (manhattan / max_dist)
-
-            # ---- 4. Wait-time proxy (fewer on-board pax → better) ----
-            max_pax = max(elevator.max_passengers, 1)
-            wait_score = 1.0 - (len(elevator.passengers) / max_pax)
-
-            # ---- 5. Emergency bonus ----
-            emergency_bonus = 1.0 if priority == "EXPRESS" else 0.0
-
-            # ---- 6. Fairness / starvation term ----
-            fairness_score = self._fairness_score(elevator, floor)
-
-            # ---- Queue-depth penalty ----
-            queue_len = len(elevator.up_queue) + len(elevator.down_queue)
-            queue_penalty = queue_len * self.queue_depth_penalty
-
-            # ---- Composite score ----
+            # ---- Composite score: f(e) = (Waiting Count * W1) + (Available Capacity * W2) - (Distance Cost * W3) ----
             score = (
-                self.weights["direction_bias"] * dir_score
-                + self.weights["load_balance"] * load_score
-                + self.weights["distance"] * distance_score
-                + self.weights["wait_time"] * wait_score
-                + self.weights["emergency_bonus"] * emergency_bonus
-                + self.weights["fairness"] * fairness_score
-                - queue_penalty
+                (waiting_count * self.weights["w1"])
+                + (available_capacity * self.weights["w2"])
+                - (distance_cost * self.weights["w3"])
             )
 
             # ---- Occupancy constraint ----
@@ -191,13 +166,9 @@ class GBFSDispatcher(DispatchStrategy):
                 {
                     "elevator_id": elevator.elevator_id,
                     "score": round(score, 4),
-                    "dir_score": round(dir_score, 4),
-                    "load_score": round(load_score, 4),
-                    "distance_score": round(distance_score, 4),
-                    "wait_score": round(wait_score, 4),
-                    "emergency_bonus": round(emergency_bonus, 4),
-                    "fairness_score": round(fairness_score, 4),
-                    "queue_penalty": round(queue_penalty, 4),
+                    "waiting_count": waiting_count,
+                    "available_capacity": available_capacity,
+                    "distance_cost": distance_cost,
                     "estimated_wait": round(estimated_wait, 2),
                     "reason": reason,
                 }

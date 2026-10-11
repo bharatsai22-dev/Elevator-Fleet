@@ -121,9 +121,8 @@ class DynamicWeightAdjuster:
                 f"SLA VIOLATION: wait={metrics['avg_wait_time']:.1f}s "
                 f"> {self.sla_wait_target_sec}s"
             )
-            new_weights["direction_bias"] += 0.05
-            new_weights["distance"] -= 0.05
-            new_weights["wait_time"] += 0.03
+            if "w1" in new_weights: new_weights["w1"] -= 0.05
+            if "w3" in new_weights: new_weights["w3"] -= 0.02
 
         # ---- RULE 2: Load imbalance ----
         if metrics["load_variance"] > self.load_variance_threshold:
@@ -131,24 +130,21 @@ class DynamicWeightAdjuster:
                 f"LOAD IMBALANCE: variance={metrics['load_variance']:.3f} "
                 f"> {self.load_variance_threshold}"
             )
-            new_weights["load_balance"] += 0.08
-            new_weights["distance"] -= 0.05
+            if "w2" in new_weights: new_weights["w2"] += 0.08
 
         # ---- RULE 3: High traffic ----
         if metrics["traffic_intensity"] > 5.0:
             reasons.append(
                 f"HIGH TRAFFIC: {metrics['traffic_intensity']:.1f} calls/min"
             )
-            new_weights["direction_bias"] += 0.03
-            new_weights["emergency_bonus"] += 0.02
+            if "w2" in new_weights: new_weights["w2"] += 0.05
 
         # ---- RULE 4: Low traffic ----
         if metrics["traffic_intensity"] < 1.0:
             reasons.append(
                 f"LOW TRAFFIC: {metrics['traffic_intensity']:.1f} calls/min"
             )
-            new_weights["distance"] += 0.05
-            new_weights["direction_bias"] -= 0.02
+            if "w3" in new_weights: new_weights["w3"] += 0.05
 
         # ---- RULE 5: Starvation (Phase 2B) ----
         if metrics["max_wait_time"] > self.sla_wait_target_sec * 1.5:
@@ -156,13 +152,10 @@ class DynamicWeightAdjuster:
                 f"STARVATION RISK: max_wait={metrics['max_wait_time']:.1f}s "
                 f"> {self.sla_wait_target_sec * 1.5:.0f}s"
             )
-            new_weights["fairness"] = new_weights.get("fairness", 0.12) + 0.05
-            new_weights["direction_bias"] -= 0.02
+            if "w1" in new_weights: new_weights["w1"] -= 0.08
 
-        # Normalise to sum ≈ 1.0
-        total = sum(new_weights.values())
-        if total > 0:
-            new_weights = {k: v / total for k, v in new_weights.items()}
+        # Note: We won't strictly normalise to sum ≈ 1.0 because w1 is negative
+        # and they have different scales.
 
         # Apply and log
         self.gbfs.set_weights(new_weights)
